@@ -1,0 +1,223 @@
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { createBrowserClient } from '@/lib/supabase';
+import { MEAL_SUGGESTIONS, QUICK_FOODS } from '@/lib/utils';
+import toast from 'react-hot-toast';
+import type { MealLog, MealType } from '@/types/database';
+
+export default function MealsPage() {
+  const supabase = createBrowserClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const [logs, setLogs] = useState<MealLog[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [mealFilter, setMealFilter] = useState<MealType | 'All'>('All');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    name: '', meal_type: 'Breakfast' as MealType, calories: '', protein_g: '', carbs_g: '', fat_g: '', notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setUserId(user.id);
+    const { data } = await supabase.from('meal_logs').select('*')
+      .eq('user_id', user.id).eq('logged_at', today).order('created_at');
+    setLogs(data || []);
+  }, [today]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function logMeal() {
+    if (!form.name || !userId) { toast.error('Enter a meal name'); return; }
+    setSaving(true);
+    await supabase.from('meal_logs').insert({
+      user_id: userId,
+      logged_at: today,
+      meal_type: form.meal_type,
+      name: form.name,
+      calories: form.calories ? parseInt(form.calories) : null,
+      protein_g: form.protein_g ? parseFloat(form.protein_g) : null,
+      carbs_g: form.carbs_g ? parseFloat(form.carbs_g) : null,
+      fat_g: form.fat_g ? parseFloat(form.fat_g) : null,
+      notes: form.notes || null,
+    });
+    toast.success('Meal logged! 🥗');
+    setForm({ name: '', meal_type: 'Breakfast', calories: '', protein_g: '', carbs_g: '', fat_g: '', notes: '' });
+    setShowForm(false);
+    setSaving(false);
+    load();
+  }
+
+  async function quickLog(s: typeof MEAL_SUGGESTIONS[0]) {
+    if (!userId) return;
+    await supabase.from('meal_logs').insert({
+      user_id: userId, logged_at: today, meal_type: s.meal_type,
+      name: s.name, calories: s.calories, protein_g: s.protein_g, notes: null,
+    });
+    toast.success(`${s.name} logged!`);
+    load();
+  }
+
+  const TYPES: Array<MealType | 'All'> = ['All', 'Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  const filtered = mealFilter === 'All' ? logs : logs.filter(l => l.meal_type === mealFilter);
+  const totalCal = logs.reduce((a, l) => a + (l.calories || 0), 0);
+  const totalProt = logs.reduce((a, l) => a + (l.protein_g || 0), 0);
+
+  const suggestions = mealFilter === 'All'
+    ? MEAL_SUGGESTIONS
+    : MEAL_SUGGESTIONS.filter(s => s.meal_type === mealFilter);
+
+  const MEAL_ICONS: Record<MealType | 'All', string> = {
+    All: '🥘', Breakfast: '🌅', Lunch: '☀️', Dinner: '🌙', Snack: '🍎',
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between pt-2">
+        <h1 className="text-xl font-semibold">Meals</h1>
+        <button onClick={() => setShowForm(s => !s)} className="btn-primary text-sm px-3 py-1.5">
+          + Log meal
+        </button>
+      </div>
+
+      {/* Daily totals */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="metric-tile text-center">
+          <p className="text-lg font-semibold">{logs.length}</p>
+          <p className="text-xs text-gray-400">Meals today</p>
+        </div>
+        <div className="metric-tile text-center">
+          <p className="text-lg font-semibold text-orange-500">{totalCal}</p>
+          <p className="text-xs text-gray-400">kcal</p>
+        </div>
+        <div className="metric-tile text-center">
+          <p className="text-lg font-semibold text-blue-500">{totalProt.toFixed(0)}g</p>
+          <p className="text-xs text-gray-400">Protein</p>
+        </div>
+      </div>
+
+      {/* Log form */}
+      {showForm && (
+        <div className="card animate-fade-up">
+          <h3 className="text-sm font-medium mb-3">Log a meal</h3>
+
+          {/* Quick pick ingredients */}
+          <div className="mb-3">
+            <p className="text-xs text-gray-500 mb-2">Quick pick</p>
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_FOODS.map(f => (
+                <button key={f} onClick={() => setForm(fm => ({ ...fm, name: fm.name ? `${fm.name} + ${f}` : f }))}
+                  className="px-2.5 py-1 bg-gray-100 hover:bg-brand-50 hover:text-brand-600 rounded-full text-xs transition-colors">
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Meal name</label>
+                <input className="input" placeholder="e.g. Nasi goreng"
+                  value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Type</label>
+                <select className="select" value={form.meal_type}
+                  onChange={e => setForm(f => ({ ...f, meal_type: e.target.value as MealType }))}>
+                  <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Calories</label>
+                <input type="number" className="input" placeholder="400"
+                  value={form.calories} onChange={e => setForm(f => ({ ...f, calories: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Protein (g)</label>
+                <input type="number" className="input" placeholder="25"
+                  value={form.protein_g} onChange={e => setForm(f => ({ ...f, protein_g: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Carbs (g)</label>
+                <input type="number" className="input" placeholder="60"
+                  value={form.carbs_g} onChange={e => setForm(f => ({ ...f, carbs_g: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Fat (g)</label>
+                <input type="number" className="input" placeholder="12"
+                  value={form.fat_g} onChange={e => setForm(f => ({ ...f, fat_g: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Notes</label>
+              <input className="input" placeholder="Portions, special ingredients, etc."
+                value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={logMeal} disabled={saving} className="btn-primary flex-1 justify-center text-sm">
+                {saving ? 'Saving…' : '✓ Save meal'}
+              </button>
+              <button onClick={() => setShowForm(false)} className="btn-secondary px-4 text-sm">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter tabs */}
+      <div className="tab-bar">
+        {TYPES.map(t => (
+          <button key={t} onClick={() => setMealFilter(t)} className={`tab ${mealFilter === t ? 'active' : ''}`}>
+            {MEAL_ICONS[t]} {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Today's logs */}
+      {filtered.length > 0 ? (
+        <div className="space-y-2">
+          {filtered.map(meal => (
+            <div key={meal.id} className="card flex justify-between items-start gap-3">
+              <div className="text-xl">{MEAL_ICONS[meal.meal_type]}</div>
+              <div className="flex-1">
+                <p className="text-sm font-medium">{meal.name}</p>
+                <p className="text-xs text-gray-400">
+                  {[meal.calories && `${meal.calories} kcal`, meal.protein_g && `${meal.protein_g}g prot`, meal.notes].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+              <span className="badge badge-blue flex-shrink-0">{meal.meal_type}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="card text-center py-8">
+          <p className="text-3xl mb-2">🍽️</p>
+          <p className="text-sm text-gray-400">No meals logged yet today</p>
+          <p className="text-xs text-gray-400 mt-1">Tap "+ Log meal" or pick a suggestion below</p>
+        </div>
+      )}
+
+      {/* Suggestions */}
+      <div>
+        <h2 className="text-sm font-semibold mb-3">💡 Meal suggestions</h2>
+        <div className="space-y-2">
+          {suggestions.map((s, i) => (
+            <div key={i} className="card flex justify-between items-center gap-3">
+              <div className="flex-1">
+                <p className="text-sm font-medium">{s.name}</p>
+                <p className="text-xs text-gray-400">{s.calories} kcal · {s.protein_g}g prot · ⏱ {s.prep_time}</p>
+                <p className="text-xs text-gray-300 mt-0.5">{s.ingredients.join(', ')}</p>
+              </div>
+              <button onClick={() => quickLog(s)}
+                className="bg-brand-50 text-brand-600 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-brand-100 transition-colors flex-shrink-0">
+                + Log
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
