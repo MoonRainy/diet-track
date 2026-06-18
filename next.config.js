@@ -1,5 +1,13 @@
-import AppLayout from '@/app/dashboard/layout';
-
-export default function SharedAppLayout({ children }: { children: React.ReactNode }) {
-  return <AppLayout>{children}</AppLayout>;
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co'
+      }
+    ]
+  }
 }
+
+module.exports = nextConfig
